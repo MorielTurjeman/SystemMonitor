@@ -7,13 +7,16 @@
 #include <limits.h>
 #include <errno.h>
 #include<unistd.h>
+#include <pthread.h>
 #define BUFSIZE (100*(sizeof(struct inotify_event)+NAME_MAX+1))
 
 
 
 
-void systemMonitor(char* watchname, char* ip)
+void* systemMonitor(void* params)
 {
+    char* watchname = "/home/moriel99/code/unix/project";
+    char* ip;
     FILE *dest;                     // write all the changes at the directory to this file
     int notifyFd, watchfd;
     struct inotify_event *event;
@@ -52,9 +55,6 @@ void systemMonitor(char* watchname, char* ip)
             if(event->mask & IN_DELETE_SELF ) printf ("watched file %s  deleted\n", event->name);
             if(event->mask & IN_MODIFY ) printf ("%s file was modified\n", event->name);
             if(event->mask & IN_MOVE_SELF ) printf ("%s file  was moved\n", event->name);
-
-
-
         }
 
 
@@ -66,7 +66,9 @@ void systemMonitor(char* watchname, char* ip)
 
 int main(int argc, char const *argv[])
 {
-  
+    pthread_t t;
+    pthread_create(&t, NULL, systemMonitor, NULL);
+    systemMonitor(NULL);
 
     return 0;
 }
