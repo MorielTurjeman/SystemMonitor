@@ -9,3 +9,7 @@ The backtrace is from the directory listener, so after you request a trace you n
 to read or write a file in the watched directory
 
 directory watch is not recursive, only the files directly in the folder are watched.
+
+The html file is as, /var/www/html/index.html in order for the html feature to work, run as super user.
+
+https://github.com/MorielTurjeman/SystemMonitor

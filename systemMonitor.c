@@ -141,6 +141,11 @@ void netcatLog(char *filePath, char *fileName, int access, ThreadParams *tp) // 
     close(nc_fd);
 
     FILE *htmlPath = fopen("/var/www/html/index.html", "a");
+    if (!htmlPath)
+    {
+        fprintf(stderr, "Could not open /var/www/html/index.html, are you running as sudo ?\n");
+        return;
+    }
     fprintf(htmlPath, "FILE ACCESSED: %s/%s<br> ACCESS: %s<br> TIME OF ACCESS: %s<br>", filePath, fileName, (access & IN_CLOSE_NOWRITE) ? "NO_WRITE" : "WRITE", buffer);
     fclose(htmlPath);
 }
