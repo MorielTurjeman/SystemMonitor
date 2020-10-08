@@ -1,0 +1,11 @@
+Moriel Turjman 308354968
+
+Assumptions:
+
+Telnet port 5555
+netcat port 9000
+
+The backtrace is from the directory listener, so after you request a trace you need
+to read or write a file in the watched directory
+
+directory watch is not recursive, only the files directly in the folder are watched.

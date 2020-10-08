@@ -36,22 +36,38 @@ typedef struct
 
 static bool backtrace_requested = false;
 static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mtxString = PTHREAD_MUTEX_INITIALIZER;
+int nptrs;
+char **strings;
+int sock;
+
+void sighandler(int sig)
+{
+    if (sig == SIGKILL || sig == SIGTERM)
+    {
+        shutdown(sock, SHUT_RDWR);
+    }
+
+}
+
 
 void print_backtrace(void)
 {
 
     int s;
+    int ms;
     s = pthread_mutex_lock(&mtx);
-    if (s != 0) // if the mtx unlocked
+    ms = pthread_mutex_lock(&mtxString);
+
+    if (s != 0 || ms != 0) // if the mtx unlocked
     {
         perror("pthread_mutex_lock");
     }
     if (backtrace_requested)
     {
 
-        int j, nptrs;
+        int j;
         void *buffer[BT_BUF_SIZE];
-        char **strings;
 
         nptrs = backtrace(buffer, BT_BUF_SIZE); //get list "addresses" which led us to this point
 
@@ -65,23 +81,17 @@ void print_backtrace(void)
             exit(EXIT_FAILURE);
         }
 
-        for (j = 0; j < nptrs; j++)
-            printf("%s\n", strings[j]);
-
-        free(strings);
-
         backtrace_requested = false;
     }
 
+    ms = pthread_mutex_unlock(&mtxString);
     s = pthread_mutex_unlock(&mtx);
 
-    if (s != 0)
+    if (s != 0 || ms != 0)
     {
         perror("pthread_mutex_unlock");
     }
 }
-
-
 
 int buildNC(char *ip, char *port)
 {
@@ -106,23 +116,6 @@ int buildNC(char *ip, char *port)
 
 void netcatLog(char *filePath, char *fileName, int access, ThreadParams *tp) // maybe later add the file that i want to pass the data, like html
 {
-    // struct stat sb;
-    // char fullPath[256] = {0};
-    //     strcat(fullPath, filePath);
-
-    // if (fileName[0] != 0)
-    // {
-    //     strcat(fullPath,"/");
-    //     strcat(fullPath, fileName);
-
-    // }
-
-    // printf("%s\n", fullPath);
-    // if (stat(fullPath, &sb) == -1)
-    // {
-    //     perror("stat");
-    //     exit(EXIT_FAILURE);
-    // }
 
     if ((access & IN_ISDIR))
         return;
@@ -141,7 +134,7 @@ void netcatLog(char *filePath, char *fileName, int access, ThreadParams *tp) // 
 
     strftime(buffer, 80, "%d %B %G %R", timeinfo);
 
-    snprintf(buf2, 256, "FILE ACCESSED: %s/%s\n ACCESS: %s %x\n TIME OF ACCESS: %s\n", filePath, fileName, (access & IN_CLOSE_NOWRITE) ? "NO_WRITE" : "WRITE", access, buffer); // print to
+    snprintf(buf2, 256, "FILE ACCESSED: %s/%s\nACCESS: %s\nTIME OF ACCESS: %s\n", filePath, fileName, (access & IN_CLOSE_NOWRITE) ? "NO_WRITE" : "WRITE", buffer); // print to
 
     write(nc_fd, buf2, strlen(buf2));
     fsync(nc_fd);
@@ -223,19 +216,39 @@ int make_socket(unsigned short int port)
 
 int backtraceHandler(struct cli_def *cli, const char *command, char *argv[], int argc)
 {
+
     int s;
+    int ms;
+
     s = pthread_mutex_lock(&mtx);
     if (s != 0) // if the mtx unlocked
     {
         perror("pthread_mutex_lock");
     }
+
     backtrace_requested = true;
     s = pthread_mutex_unlock(&mtx);
     if (s != 0) // if the mtx unlocked
     {
         perror("pthread_mutex_ulock");
     }
+    while (true)
+    {
+        pthread_mutex_lock(&mtxString);
+        if (strings != NULL)
+            break;
+        pthread_mutex_unlock(&mtxString);
+    }
+        
 
+    for (int j = 0; j < nptrs; j++)
+        cli_print(cli, "%s", strings[j]);
+
+    free(strings);
+    strings = NULL;
+    ms = pthread_mutex_unlock(&mtxString);
+
+    
     return CLI_OK;
 }
 
@@ -243,13 +256,11 @@ int read_from_client(int filedes)
 {
 
     struct cli_command *c = cli_register_command(cli, NULL, "backtrace", backtraceHandler, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, NULL);
-    cli_set_banner(cli, "Hello world");
     cli_loop(cli, filedes);
 }
 
 void *serverMonitor(void *params)
 {
-    int sock;
     fd_set active_fd_set, read_fd_set;
     int i;
     struct sockaddr_in clientname;
@@ -305,21 +316,40 @@ void *serverMonitor(void *params)
     }
 }
 
-int main(int argc, char const *argv[])
+int main(int argc, char  *argv[])
 {
 
     cli = cli_init();
     pthread_t t;
     pthread_t cliThread;
     ThreadParams tp;
-    tp.path = "/home/moriel99/code/blalba";
-    tp.ip = "192.168.1.115";
+    int opt;
+
+    if (argc != 5)
+        exit(-1);
+
+    while ((opt = getopt(argc, argv, "d:i:")) != -1)
+    {
+        switch (opt)
+        {
+            case 'd':
+                tp.path = optarg;
+                break;
+            case 'i':
+                tp.ip = optarg;
+                break;
+        }   
+    }
+
+
     tp.port = "9000";
 
     int res = pthread_create(&t, NULL, systemMonitor, &tp);
     int res2 = pthread_create(&cliThread, NULL, serverMonitor, NULL);
 
     pthread_join(t, NULL);
+    signal(SIGKILL, sighandler);
+    signal(SIGTERM, sighandler);
     return 0;
 }
 
