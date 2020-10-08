@@ -17,16 +17,15 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <libcli.h>
+#include <execinfo.h>
+#include <stdbool.h>
 
 #define PORT 5555
 #define MAXMSG 512
 #define BUFSIZE (100 * (sizeof(struct inotify_event) + NAME_MAX + 1))
+#define BT_BUF_SIZE 100
 
-
-struct cli_def* cli;
-
-
-
+struct cli_def *cli;
 
 typedef struct
 {
@@ -34,6 +33,55 @@ typedef struct
     char *ip;
     char *port;
 } ThreadParams;
+
+static bool backtrace_requested = false;
+static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+
+void print_backtrace(void)
+{
+
+    int s;
+    s = pthread_mutex_lock(&mtx);
+    if (s != 0) // if the mtx unlocked
+    {
+        perror("pthread_mutex_lock");
+    }
+    if (backtrace_requested)
+    {
+
+        int j, nptrs;
+        void *buffer[BT_BUF_SIZE];
+        char **strings;
+
+        nptrs = backtrace(buffer, BT_BUF_SIZE); //get list "addresses" which led us to this point
+
+        /* The call backtrace_symbols_fd(buffer, nptrs, STDOUT_FILENO)
+              would produce similar output to the following: */
+
+        strings = backtrace_symbols(buffer, nptrs); //try to qconvert address list to function names
+        if (strings == NULL)
+        {
+            perror("backtrace_symbols");
+            exit(EXIT_FAILURE);
+        }
+
+        for (j = 0; j < nptrs; j++)
+            printf("%s\n", strings[j]);
+
+        free(strings);
+
+        backtrace_requested = false;
+    }
+
+    s = pthread_mutex_unlock(&mtx);
+
+    if (s != 0)
+    {
+        perror("pthread_mutex_unlock");
+    }
+}
+
+
 
 int buildNC(char *ip, char *port)
 {
@@ -76,7 +124,7 @@ void netcatLog(char *filePath, char *fileName, int access, ThreadParams *tp) // 
     //     exit(EXIT_FAILURE);
     // }
 
-    if ((access & IN_ISDIR) && (access & IN_CLOSE_NOWRITE))
+    if ((access & IN_ISDIR))
         return;
 
     int nc_fd = buildNC(tp->ip, tp->port);
@@ -173,19 +221,31 @@ int make_socket(unsigned short int port)
     return sock;
 }
 
+int backtraceHandler(struct cli_def *cli, const char *command, char *argv[], int argc)
+{
+    int s;
+    s = pthread_mutex_lock(&mtx);
+    if (s != 0) // if the mtx unlocked
+    {
+        perror("pthread_mutex_lock");
+    }
+    backtrace_requested = true;
+    s = pthread_mutex_unlock(&mtx);
+    if (s != 0) // if the mtx unlocked
+    {
+        perror("pthread_mutex_ulock");
+    }
 
-int read_from_client(int filedes)
-{   
-
-   struct cli_command *c=cli_register_command(cli ,NULL, "backtrace", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, NULL);
-   cli_set_banner(cli, "hello world");
-   cli_loop(cli, filedes);
-
-        
+    return CLI_OK;
 }
 
+int read_from_client(int filedes)
+{
 
-
+    struct cli_command *c = cli_register_command(cli, NULL, "backtrace", backtraceHandler, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, NULL);
+    cli_set_banner(cli, "Hello world");
+    cli_loop(cli, filedes);
+}
 
 void *serverMonitor(void *params)
 {
@@ -237,16 +297,7 @@ void *serverMonitor(void *params)
 
                     else
                     {
-                        FD_SET(new, &active_fd_set);
-                        FD_CLR(sock, &active_fd_set);
-                    }
-                }
-                else
-                {
-                    if (read_from_client(i) < 0) //read the command from the socket in a seperate function
-                    {
-                        close(i);
-                        FD_CLR(i, &active_fd_set);
+                        read_from_client(new);
                     }
                 }
             }
@@ -256,8 +307,8 @@ void *serverMonitor(void *params)
 
 int main(int argc, char const *argv[])
 {
-    
-    cli =cli_init();
+
+    cli = cli_init();
     pthread_t t;
     pthread_t cliThread;
     ThreadParams tp;
@@ -266,8 +317,20 @@ int main(int argc, char const *argv[])
     tp.port = "9000";
 
     int res = pthread_create(&t, NULL, systemMonitor, &tp);
-    int res2= pthread_create(&cliThread,NULL,serverMonitor,NULL);
+    int res2 = pthread_create(&cliThread, NULL, serverMonitor, NULL);
 
     pthread_join(t, NULL);
     return 0;
+}
+
+void __attribute__((no_instrument_function)) __cyg_profile_func_enter(void *this_fn,
+                                                                      void *call_site)
+{
+    if (this_fn == systemMonitor || this_fn == netcatLog || this_fn == buildNC)
+        print_backtrace();
+}
+
+void __attribute__((no_instrument_function)) __cyg_profile_func_exit(void *this_fn,
+                                                                     void *call_site)
+{
 }
