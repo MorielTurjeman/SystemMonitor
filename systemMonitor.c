@@ -169,7 +169,7 @@ void *systemMonitor(void *params)
         return NULL;
     }
 
-    watchfd = inotify_add_watch(notifyFd, watchname, IN_CLOSE_NOWRITE | IN_CLOSE_WRITE);
+    watchfd = inotify_add_watch(notifyFd, watchname, IN_CLOSE | IN_CLOSE_WRITE);
     if (watchfd < 0)
     {
         printf("%s", strerror(errno));
@@ -205,6 +205,10 @@ int make_socket(unsigned short int port)
         perror("socket");
         exit(EXIT_FAILURE);
     }
+
+    int enable = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
+        perror("setsockopt(SO_REUSEADDR) failed");
 
     /* Give the socket a name. */
     name.sin_family = AF_INET;
